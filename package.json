@@ -1,0 +1,41 @@
+{
+    "name": "audiomesh",
+    "version": "0.1.0",
+    "private": true,
+    "description": "AudioMesh - modular voice-agent and audio-routing platform",
+    "license": "ISC",
+    "author": "Stefan Werfling",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/stefanwerfling/audiomesh.git"
+    },
+    "bugs": {
+        "url": "https://github.com/stefanwerfling/audiomesh/issues"
+    },
+    "homepage": "https://github.com/stefanwerfling/audiomesh#readme",
+    "workspaces": [
+        "schemas",
+        "backend",
+        "frontend"
+    ],
+    "scripts": {
+        "build": "npm run build --workspaces",
+        "dev:backend": "npm run dev -w @audiomesh/backend",
+        "dev:frontend": "npm run dev -w @audiomesh/frontend",
+        "typecheck": "npm run typecheck --workspaces",
+        "lint": "eslint .",
+        "format": "prettier --write .",
+        "format:check": "prettier --check .",
+        "test": "npm run test --workspaces --if-present"
+    },
+    "devDependencies": {
+        "@eslint/js": "^9.13.0",
+        "eslint": "^9.13.0",
+        "prettier": "^3.3.3",
+        "typescript": "^5.7.3",
+        "typescript-eslint": "^8.12.2"
+    },
+    "overrides": {
+        "typeorm": "^0.3.28"
+    }
+}

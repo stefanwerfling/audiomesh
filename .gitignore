@@ -1,0 +1,22 @@
+node_modules/
+dist/
+*.log
+.DS_Store
+
+# local runtime state / secrets (never committed)
+.env
+/backend/config.json
+/backend/.audiomesh-settings.json
+/backend/logs/
+/backend/data/
+*.sqlite
+*.sqlite3
+
+# frontend build output (assets are copied in at build time)
+/frontend/assets/
+/frontend/dist/
+
+# editor & OS
+.vscode/
+.idea/
+*.swp

@@ -1,0 +1,17 @@
+{
+    "httpserver": {
+        "port": 3901,
+        "publicdir": "../frontend"
+    },
+    "db": {},
+    "logging": {
+        "enableConsole": true,
+        "level": "info",
+        "dirname": "/app/backend/data/logs"
+    },
+    "dataDir": "/app/backend/data",
+    "database": {
+        "kind": "sqlite",
+        "file": "/app/backend/data/audiomesh.db"
+    }
+}

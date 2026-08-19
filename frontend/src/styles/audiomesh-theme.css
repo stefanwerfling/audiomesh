@@ -1,0 +1,91 @@
+/* AudioMesh theme — dark, technical, cyan accents on top of AdminLTE dark-mode.
+   Loaded last in index.html so these rules win the cascade. */
+
+:root {
+    --am-accent: #22d3ee;
+    --am-bg: #0f172a;
+    --am-panel: #1e293b;
+}
+
+body.audiomesh-dark {
+    background-color: var(--am-bg);
+}
+
+.audiomesh-dark .main-sidebar {
+    background-color: #0b1120;
+}
+
+.audiomesh-dark .brand-link .brand-text {
+    color: var(--am-accent);
+    font-weight: 600;
+    letter-spacing: 0.03em;
+}
+
+.audiomesh-dark .card {
+    background-color: var(--am-panel);
+    border: 1px solid #334155;
+}
+
+.audiomesh-dark .card-header {
+    border-bottom: 1px solid #334155;
+}
+
+.audiomesh-dark .table {
+    color: #e2e8f0;
+}
+
+.audiomesh-dark .small-box .icon > i {
+    color: rgba(255, 255, 255, 0.2);
+}
+
+/* Live event feed on the dashboard. */
+.am-event-feed,
+.am-log-body {
+    max-height: 320px;
+    overflow-y: auto;
+    font-size: 0.85rem;
+}
+
+.am-event {
+    padding: 2px 0;
+    border-bottom: 1px solid #33415533;
+}
+
+.am-event-time {
+    color: #64748b;
+    font-family: monospace;
+    margin-right: 4px;
+}
+
+/* Transcript panes (session detail + global feed). */
+.am-transcript {
+    max-height: 380px;
+    overflow-y: auto;
+    padding: 8px;
+    background: #0b1120;
+    border-radius: 4px;
+}
+
+.am-transcript .am-partial {
+    color: #94a3b8;
+    font-style: italic;
+}
+
+.am-transcript .am-final {
+    color: #e2e8f0;
+}
+
+.am-participants {
+    list-style: none;
+    padding-left: 0;
+}
+
+.am-participants li {
+    padding: 4px 0;
+    border-bottom: 1px solid #33415533;
+}
+
+.am-status-table td {
+    border: none;
+    padding: 4px 8px;
+}

@@ -1,0 +1,20 @@
+# AudioMesh — minimal deployment. One service; the backend serves the dashboard.
+# SQLite lives in a named volume, so no separate database container is needed for
+# the MVP (switch to MariaDB via AUDIOMESH_DATABASE_* env when you scale out).
+services:
+    audiomesh:
+        build: .
+        image: audiomesh:latest
+        ports:
+            - '3901:3901'
+        environment:
+            # Change these for anything beyond local use.
+            AUDIOMESH_ADMIN_USER: '${AUDIOMESH_ADMIN_USER:-admin}'
+            AUDIOMESH_ADMIN_PASSWORD: '${AUDIOMESH_ADMIN_PASSWORD:-admin}'
+            AUDIOMESH_JWT_SECRET: '${AUDIOMESH_JWT_SECRET:-}'
+        volumes:
+            - audiomesh-data:/app/backend/data
+        restart: unless-stopped
+
+volumes:
+    audiomesh-data:
