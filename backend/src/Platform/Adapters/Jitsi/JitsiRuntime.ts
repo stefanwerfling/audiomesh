@@ -16,6 +16,30 @@ import { fileURLToPath } from 'node:url';
 const VENDOR_BUNDLE = new URL('../../../../vendor/jitsi/lib-jitsi-meet.min.js', import.meta.url);
 
 /**
+ * The WebRTC classes we expose on window/global from wrtc so the bundle can find
+ * them. RTCRtpTransceiver is mandatory (its prototype gates the lib's
+ * codec-preference feature-detect). These are also the prototypes we snapshot and
+ * restore around the bundle require — see {@link loadJitsiRuntime}.
+ */
+const WRTC_GLOBAL_CLASSES: readonly string[] = [
+    'RTCPeerConnection',
+    'RTCSessionDescription',
+    'RTCIceCandidate',
+    'RTCRtpTransceiver',
+    'RTCRtpSender',
+    'RTCRtpReceiver',
+    'RTCDataChannel',
+    'RTCDataChannelEvent',
+    'RTCDtlsTransport',
+    'RTCIceTransport',
+    'RTCSctpTransport',
+    'RTCPeerConnectionIceEvent',
+    'RTCPeerConnectionIceErrorEvent',
+    'MediaStream',
+    'MediaStreamTrack',
+];
+
+/**
  * The loaded runtime: the `JitsiMeetJS` object plus the `wrtc` handle (the adapter
  * needs `wrtc.nonstandard.RTCAudioSink/Source` for the audio path).
  */
@@ -39,6 +63,28 @@ export async function loadJitsiRuntime(domain: string): Promise<JitsiRuntime> {
     const wrtc: any = await _import('@roamhq/wrtc');
     await _installBrowserGlobals(domain, wrtc);
 
+    // The bundle runs webrtc-adapter at require time, which patches the WebRTC
+    // classes on window — i.e. wrtc's *shared* native prototypes — with DOM-style
+    // shims (onicecandidate/addEventListener wrappers, SDP munging, candidate
+    // re-wrapping). Those shims are incompatible with wrtc and abort its native ICE
+    // gathering the moment a conference starts. wrtc's own prototypes are already
+    // browser-compatible (Chromium/unified-plan), so we snapshot every class we
+    // expose (prototype + constructor statics like RTCRtpSender.getCapabilities)
+    // before the require and restore them after — undoing adapter's patching while
+    // keeping the loaded JitsiMeetJS. Restoring only RTCPeerConnection is not
+    // enough: adapter also corrupts RTCRtpSender/Receiver/transport prototypes.
+    const snapshots: Array<{ target: any; snap: Map<string, PropertyDescriptor> }> = [];
+    for (const key of WRTC_GLOBAL_CLASSES) {
+        const ctor: any = wrtc[key];
+        if (ctor === undefined) {
+            continue;
+        }
+        snapshots.push({ target: ctor, snap: _snapshotOwnDescriptors(ctor) });
+        if (ctor.prototype !== undefined && ctor.prototype !== null) {
+            snapshots.push({ target: ctor.prototype, snap: _snapshotOwnDescriptors(ctor.prototype) });
+        }
+    }
+
     let JitsiMeetJS: any;
     try {
         const require = createRequire(import.meta.url);
@@ -50,8 +96,44 @@ export async function loadJitsiRuntime(domain: string): Promise<JitsiRuntime> {
                 `Original error: ${(error as Error).message}`,
         );
     }
+
+    for (const { target, snap } of snapshots) {
+        _restoreOwnDescriptors(target, snap);
+    }
     _cached = { JitsiMeetJS: JitsiMeetJS, wrtc: wrtc };
     return _cached;
+}
+
+/** Capture every own-property descriptor of an object (for later exact restore). */
+function _snapshotOwnDescriptors(obj: any): Map<string, PropertyDescriptor> {
+    const snap: Map<string, PropertyDescriptor> = new Map();
+    for (const key of Object.getOwnPropertyNames(obj)) {
+        const desc: PropertyDescriptor | undefined = Object.getOwnPropertyDescriptor(obj, key);
+        if (desc !== undefined) {
+            snap.set(key, desc);
+        }
+    }
+    return snap;
+}
+
+/** Restore an object to a prior snapshot: drop keys added since, reinstate originals. */
+function _restoreOwnDescriptors(obj: any, snapshot: Map<string, PropertyDescriptor>): void {
+    for (const key of Object.getOwnPropertyNames(obj)) {
+        if (!snapshot.has(key)) {
+            try {
+                delete obj[key];
+            } catch {
+                /* non-configurable: leave it */
+            }
+        }
+    }
+    for (const [key, desc] of snapshot) {
+        try {
+            Object.defineProperty(obj, key, desc);
+        } catch {
+            /* non-configurable / unchanged: skip */
+        }
+    }
 }
 
 async function _import(name: string): Promise<any> {
@@ -85,6 +167,20 @@ async function _installBrowserGlobals(domain: string, wrtc: any): Promise<void> 
     });
     const win: any = dom.window;
     const g: any = globalThis as any;
+
+    // Present as Chrome — this MUST happen before the lib bundle is required.
+    // lib-jitsi-meet bundles webrtc-adapter, which sniffs the user-agent at load
+    // time and applies engine-specific shims to window.RTCPeerConnection — and
+    // because that is wrtc's *shared* prototype, the wrong shim set corrupts every
+    // PeerConnection. jsdom's default UA ("…AppleWebKit… jsdom…") is detected as
+    // Safari, whose shims abort wrtc's native ICE gathering right after
+    // CONFERENCE_JOINED. wrtc *is* libwebrtc (Chromium), so a Chrome UA selects the
+    // shim set compatible with it. (jsdom's `userAgent` constructor option is a
+    // no-op in jsdom 30, so override navigator.userAgent directly.)
+    Object.defineProperty(win.navigator, 'userAgent', {
+        configurable: true,
+        value: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+    });
 
     g.self = g;
     g.window = win;
@@ -129,41 +225,20 @@ async function _installBrowserGlobals(domain: string, wrtc: any): Promise<void> 
     // `'setCodecPreferences' in window.RTCRtpTransceiver.prototype`, which *throws*
     // (not returns false) if RTCRtpTransceiver is missing — aborting PeerConnection
     // setup right after CONFERENCE_JOINED. wrtc provides all of these.
-    for (const key of [
-        'RTCPeerConnection',
-        'RTCSessionDescription',
-        'RTCIceCandidate',
-        'RTCRtpTransceiver',
-        'RTCRtpSender',
-        'RTCRtpReceiver',
-        'RTCDataChannel',
-        'RTCDataChannelEvent',
-        'RTCDtlsTransport',
-        'RTCIceTransport',
-        'RTCSctpTransport',
-        'RTCPeerConnectionIceEvent',
-        'RTCPeerConnectionIceErrorEvent',
-        'MediaStream',
-        'MediaStreamTrack',
-    ]) {
+    for (const key of WRTC_GLOBAL_CLASSES) {
         if (wrtc[key] !== undefined) {
             g[key] = wrtc[key];
             win[key] = wrtc[key];
         }
     }
 
-    // The bundled webrtc-adapter tries to re-wrap every `icecandidate` event's
-    // `candidate` via Object.defineProperty and throws on wrtc's non-configurable
-    // property ("Cannot redefine property: candidate") the moment ICE gathering
-    // starts. adapter skips that shim when `RTCIceCandidate.prototype` already has
-    // `foundation` — wrtc exposes `foundation` only per-instance, so advertise it
-    // on the prototype to opt out of the shim.
-    if (wrtc.RTCIceCandidate !== undefined && !('foundation' in wrtc.RTCIceCandidate.prototype)) {
-        Object.defineProperty(wrtc.RTCIceCandidate.prototype, 'foundation', {
-            value: null,
-            configurable: true,
-        });
-    }
+    // (Note: we deliberately do NOT force webrtc-adapter to skip its
+    // shimRTCIceCandidate. Making it skip — e.g. by advertising `foundation` on
+    // RTCIceCandidate.prototype — leaves wrtc's native candidate handling in the
+    // gathering path, which SIGABRTs the process. Letting the shim run is benign
+    // once the prototype restore below removes adapter's harmful onicecandidate
+    // re-wrapper from RTCPeerConnection.prototype.)
+
     // DOM globals the bundle reads off the global scope (provided by jsdom).
     for (const key of [
         'DOMParser',
