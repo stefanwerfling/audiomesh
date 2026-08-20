@@ -1,4 +1,5 @@
 import js from '@eslint/js';
+import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
@@ -9,9 +10,12 @@ export default tseslint.config(
             '**/*.d.ts',
             'frontend/public/**',
             'frontend/assets/**',
+            // Vendored third-party bundle (minified lib-jitsi-meet) — not ours to lint.
+            'backend/vendor/**',
             // Build configs are CommonJS by necessity (webpack / gulp); the strict TS rules
             // don't apply to them.
             'frontend/webpack.config.js',
+            'frontend/webpack-empty.js',
             'frontend/gulpfile.js',
         ],
     },
@@ -27,6 +31,14 @@ export default tseslint.config(
                 'warn',
                 { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
             ],
+        },
+    },
+    {
+        // Plain Node scripts (maintenance + manual smoke tests): pure JS run by
+        // node/tsx, so they need Node's runtime globals (process, console, …).
+        files: ['**/scripts/**/*.mjs'],
+        languageOptions: {
+            globals: globals.node,
         },
     },
 );

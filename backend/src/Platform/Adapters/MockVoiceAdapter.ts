@@ -5,6 +5,7 @@ import { NullAudioSink } from '../../Audio/NullAudioSink.js';
 import { PushAudioSource } from '../../Audio/PushAudioSource.js';
 import type {
     AdapterConfig,
+    IAdapterEventListener,
     IChannelInfo,
     IParticipantInfo,
     IVoicePlatformAdapter,
@@ -18,7 +19,6 @@ import type {
  * without a real voice platform" true.
  */
 export class MockVoiceAdapter implements IVoicePlatformAdapter {
-
     public readonly kind: PlatformKind = 'mock';
 
     private static readonly FRAME_MS: number = 20;
@@ -84,6 +84,10 @@ export class MockVoiceAdapter implements IVoicePlatformAdapter {
         return this._participants;
     }
 
+    public setEventListener(_listener: IAdapterEventListener | null): void {
+        // The mock has a fixed roster and no live membership/speaking events.
+    }
+
     public receiveAudio(participantId: string): IAudioSource {
         const existing: PushAudioSource | undefined = this._sources.get(participantId);
         if (existing !== undefined) {
@@ -128,5 +132,4 @@ export class MockVoiceAdapter implements IVoicePlatformAdapter {
             speakerId: speakerId,
         };
     }
-
 }

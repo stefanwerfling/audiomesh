@@ -2,6 +2,10 @@ import { join } from 'node:path';
 import { BackendApp, ConfigBackend, HttpService, Logger } from 'figtree';
 import type { DefaultArgs } from 'figtree-schemas';
 import { MetricsCollector } from '../Core/MetricsCollector.js';
+import { JitsiAdapter } from '../Platform/Adapters/Jitsi/JitsiAdapter.js';
+import { LibJitsiClient } from '../Platform/Adapters/Jitsi/LibJitsiClient.js';
+import type { JitsiConfig } from '../Platform/Adapters/Jitsi/JitsiConfig.js';
+import type { IJitsiClient } from '../Platform/Adapters/Jitsi/IJitsiClient.js';
 import { MockVoiceAdapter } from '../Platform/Adapters/MockVoiceAdapter.js';
 import { PlatformRegistry } from '../Platform/PlatformRegistry.js';
 import type { AdapterConfig } from '../Platform/IVoicePlatformAdapter.js';
@@ -20,7 +24,6 @@ import { WsEventBridge } from './Ws/WsEventBridge.js';
  * EventBus → WebSocket bridge.
  */
 export class AudioMeshApp extends BackendApp<DefaultArgs, AudioMeshConfig> {
-
     private readonly _configInstance: AudioMeshConfigBackend;
 
     public constructor() {
@@ -50,6 +53,14 @@ export class AudioMeshApp extends BackendApp<DefaultArgs, AudioMeshConfig> {
             'mock',
             (adapterConfig: AdapterConfig): MockVoiceAdapter => new MockVoiceAdapter(adapterConfig),
         );
+        PlatformRegistry.getInstance().register(
+            'jitsi',
+            (adapterConfig: AdapterConfig): JitsiAdapter =>
+                new JitsiAdapter(
+                    adapterConfig,
+                    (jitsiConfig: JitsiConfig): IJitsiClient => new LibJitsiClient(jitsiConfig),
+                ),
+        );
 
         // Wire the event fan-out + metrics before the HTTP layer accepts clients.
         MetricsCollector.getInstance().bind();
@@ -61,5 +72,4 @@ export class AudioMeshApp extends BackendApp<DefaultArgs, AudioMeshConfig> {
 
         Logger.getLogger().info('AudioMeshApp: services initialised');
     }
-
 }

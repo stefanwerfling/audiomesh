@@ -11,13 +11,16 @@
         "start": "node dist/index.js",
         "typecheck": "tsc --noEmit -p tsconfig.test.json",
         "test": "vitest run",
-        "test:watch": "vitest"
+        "test:watch": "vitest",
+        "update:jitsi-lib": "node scripts/update-jitsi-lib.mjs"
     },
     "dependencies": {
         "@audiomesh/schemas": "*",
+        "@roamhq/wrtc": "^0.10.0",
         "better-sqlite3": "^12.9.0",
         "figtree": "git+https://github.com/stefanwerfling/figtree.git#claude",
         "figtree-schemas": "github:stefanwerfling/figtree-schemas",
+        "jsdom": "^30.0.1",
         "reflect-metadata": "^0.2.2",
         "typeorm": "^0.3.28",
         "vts": "github:OpenSourcePKG/vts",

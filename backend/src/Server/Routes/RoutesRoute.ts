@@ -19,7 +19,6 @@ import { ConfigStore } from '../../Store/ConfigStore.js';
  * Phase 5 — start/stop currently flip run-state and emit events so the UI is real.
  */
 export class RoutesRoute extends DefaultRoute {
-
     public constructor() {
         super();
         this._uriBase = '/api/';
@@ -30,7 +29,11 @@ export class RoutesRoute extends DefaultRoute {
             this._getUrl('v1', 'routes', 'list'),
             false,
             async (_req, _res, _data): Promise<AudioRoute[]> => this.list(),
-            { description: 'List audio routes.', tags: ['routes'], responseBodySchema: AudioRouteListSchema },
+            {
+                description: 'List audio routes.',
+                tags: ['routes'],
+                responseBodySchema: AudioRouteListSchema,
+            },
         );
         this._post(
             this._getUrl('v1', 'routes', 'create'),
@@ -66,30 +69,42 @@ export class RoutesRoute extends DefaultRoute {
                 AudioRouter.getInstance().stop(id);
                 return { ok: ConfigStore.getInstance().deleteRoute(id) };
             },
-            { description: 'Delete a route by ?id=.', tags: ['routes'], responseBodySchema: ApiResultSchema },
+            {
+                description: 'Delete a route by ?id=.',
+                tags: ['routes'],
+                responseBodySchema: ApiResultSchema,
+            },
         );
         this._post(
             this._getUrl('v1', 'routes', 'start'),
             false,
             async (req, _res, _data): Promise<ApiResult> => this.setRunning(req.query['id'], true),
-            { description: 'Start a route by ?id=.', tags: ['routes'], responseBodySchema: ApiResultSchema },
+            {
+                description: 'Start a route by ?id=.',
+                tags: ['routes'],
+                responseBodySchema: ApiResultSchema,
+            },
         );
         this._post(
             this._getUrl('v1', 'routes', 'stop'),
             false,
             async (req, _res, _data): Promise<ApiResult> => this.setRunning(req.query['id'], false),
-            { description: 'Stop a route by ?id=.', tags: ['routes'], responseBodySchema: ApiResultSchema },
+            {
+                description: 'Stop a route by ?id=.',
+                tags: ['routes'],
+                responseBodySchema: ApiResultSchema,
+            },
         );
         return super.getExpressRouter();
     }
 
     public list(): AudioRoute[] {
-        const running: AudioRouter = AudioRouter.getInstance();
+        const router: AudioRouter = AudioRouter.getInstance();
         return ConfigStore.getInstance()
             .listRoutes()
             .map((route: AudioRoute): AudioRoute => ({
                 ...route,
-                state: running.isRunning(route.id) ? 'running' : 'stopped',
+                state: router.getState(route.id),
             }));
     }
 
@@ -102,11 +117,10 @@ export class RoutesRoute extends DefaultRoute {
             return { ok: false, message: `unknown route '${id}'` };
         }
         if (run) {
-            AudioRouter.getInstance().start(route);
-        } else {
-            AudioRouter.getInstance().stop(id);
+            const ok: boolean = AudioRouter.getInstance().start(route);
+            return { ok: ok, message: ok ? 'route running' : 'route failed to start (see logs)' };
         }
+        AudioRouter.getInstance().stop(id);
         return { ok: true };
     }
-
 }

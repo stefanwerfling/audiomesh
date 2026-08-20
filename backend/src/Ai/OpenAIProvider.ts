@@ -9,7 +9,6 @@ import type { IAIProvider } from './IAIProvider.js';
  * Settings UI is wired end-to-end.
  */
 export class OpenAIProvider implements IAIProvider {
-
     public readonly name: string = 'openai';
 
     public isConfigured(): boolean {
@@ -20,12 +19,22 @@ export class OpenAIProvider implements IAIProvider {
         if (!this.isConfigured()) {
             return { ok: false, message: 'no API key configured' };
         }
-        // Phase 3 replaces this with a real lightweight call (e.g. GET /models).
-        return { ok: true, message: 'API key present (live check added in Phase 3)' };
+        // Lightweight live probe: list models. Cheap, no side effects, and proves
+        // the key is valid and the API reachable.
+        try {
+            const response: Response = await fetch('https://api.openai.com/v1/models', {
+                headers: { Authorization: `Bearer ${ConfigStore.getInstance().getOpenAiKey()}` },
+            });
+            if (response.ok) {
+                return { ok: true, message: 'connection ok' };
+            }
+            return { ok: false, message: `OpenAI returned ${response.status}` };
+        } catch (error: unknown) {
+            return { ok: false, message: (error as Error).message };
+        }
     }
 
     public async complete(_systemPrompt: string, _userText: string): Promise<string> {
         throw new Error('OpenAIProvider.complete: not implemented until Phase 3');
     }
-
 }

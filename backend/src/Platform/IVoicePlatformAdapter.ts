@@ -17,6 +17,20 @@ export interface IParticipantInfo {
 export type AdapterConfig = Record<string, unknown>;
 
 /**
+ * Live callbacks an adapter raises as the channel changes *after* join — the seam
+ * for dynamic membership and speaking activity. The {@link VoiceSessionManager}
+ * registers one listener per session so late joiners get a `Participant` + audio
+ * pipeline, leavers are torn down, and speaking transitions become domain events.
+ * All identifiers are the platform's own user id (matching {@link IParticipantInfo}).
+ */
+export interface IAdapterEventListener {
+    onParticipantJoined(participant: IParticipantInfo): void;
+    onParticipantLeft(platformUserId: string): void;
+    /** Speaking activity toggled for a participant (e.g. Jitsi dominant speaker). */
+    onSpeakingChanged(platformUserId: string, speaking: boolean): void;
+}
+
+/**
  * The single seam every voice platform plugs into. The Core talks only to this
  * interface — Discord/TeamSpeak/Jitsi live entirely inside their own
  * implementation. **Adding a platform must not require Core changes**: write a
@@ -36,6 +50,13 @@ export interface IVoicePlatformAdapter {
     joinChannel(channelId: string): Promise<IChannelInfo>;
     leaveChannel(): Promise<void>;
     getParticipants(): Promise<IParticipantInfo[]>;
+
+    /**
+     * Register (or clear with `null`) the listener for post-join membership and
+     * speaking events. Set before `connect`/`joinChannel` so no early join is
+     * missed. Adapters that have no dynamic events may store and never call it.
+     */
+    setEventListener(listener: IAdapterEventListener | null): void;
 
     /** Per-participant receive stream (internal PCM). */
     receiveAudio(participantId: string): IAudioSource;

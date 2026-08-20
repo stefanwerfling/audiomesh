@@ -7,9 +7,13 @@ const ForkTsCheckerWebpackPlugin = require('fork-ts-checker-webpack-plugin');
 
 // bambooo's v2 barrel re-exports optional Map/PDF/Scanner widgets that pull heavy
 // deps (OpenLayers, pdfjs-dist, jsvectormap, barcode-detector). AudioMesh uses none
-// of them, so we ignore those module requests instead of installing ~30 MB of deps.
-// The referencing classes are only ever touched if instantiated, which we never do.
+// of them, so we replace those module requests with an empty stub instead of
+// installing ~30 MB of deps. NB: IgnorePlugin is wrong here — it makes the barrel's
+// eager `require('ol')` THROW at load and crash the whole SPA; a stub module returns
+// {} harmlessly (the referencing classes are only touched if instantiated, never).
 const IGNORED_OPTIONAL = /^(pdfjs-dist|barcode-detector|ol|ol-layerswitcher|jsvectormap)(\/|$)/u;
+// eslint-disable-next-line no-undef
+const EMPTY_MODULE = path.resolve(__dirname, 'webpack-empty.js');
 
 // eslint-disable-next-line no-undef
 module.exports = {
@@ -57,7 +61,7 @@ module.exports = {
 
     plugins: [
         new ForkTsCheckerWebpackPlugin(),
-        new webpack.IgnorePlugin({ resourceRegExp: IGNORED_OPTIONAL }),
+        new webpack.NormalModuleReplacementPlugin(IGNORED_OPTIONAL, EMPTY_MODULE),
     ],
 
     watch: false,

@@ -1,0 +1,7 @@
+{
+    "source": "https://konferenz.pegenau.de/libs/lib-jitsi-meet.min.js",
+    "bytes": 1120962,
+    "sha256": "7dc2ff1657a9d106bd078d1faeacb6e34e161c2c0a565413a5dd4c3440ca7307",
+    "fetchedAt": "2026-08-20T12:57:01.384Z",
+    "note": "Official lib-jitsi-meet build vendored from a Jitsi deployment. Apache-2.0. Loaded headless by JitsiRuntime."
+}

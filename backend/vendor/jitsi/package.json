@@ -1,0 +1,6 @@
+{
+    "name": "@audiomesh/jitsi-lib-vendor",
+    "private": true,
+    "type": "commonjs",
+    "description": "Vendored official lib-jitsi-meet bundle (CommonJS island inside the ESM backend). Managed by scripts/update-jitsi-lib.mjs."
+}

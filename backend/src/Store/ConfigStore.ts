@@ -51,7 +51,6 @@ interface StoredState {
  * (OpenAI) is fully redacted.
  */
 export class ConfigStore {
-
     private static _instance: ConfigStore | null = null;
 
     public static install(filePath: string): ConfigStore {
@@ -106,7 +105,9 @@ export class ConfigStore {
             const parsed: Partial<StoredState> = JSON.parse(raw) as Partial<StoredState>;
             this._state = { ...ConfigStore._defaults(), ...parsed };
         } catch (error: unknown) {
-            Logger.getLogger().error(`ConfigStore: failed to load, using defaults: ${(error as Error).message}`);
+            Logger.getLogger().error(
+                `ConfigStore: failed to load, using defaults: ${(error as Error).message}`,
+            );
             this._state = ConfigStore._defaults();
         }
     }
@@ -157,7 +158,9 @@ export class ConfigStore {
 
     public deletePlatform(id: string): boolean {
         const before: number = this._state.platforms.length;
-        this._state.platforms = this._state.platforms.filter((p: StoredPlatform): boolean => p.id !== id);
+        this._state.platforms = this._state.platforms.filter(
+            (p: StoredPlatform): boolean => p.id !== id,
+        );
         const changed: boolean = this._state.platforms.length !== before;
         if (changed) {
             this._persist();
@@ -190,7 +193,9 @@ export class ConfigStore {
     }
 
     public updateAgent(id: string, body: AgentProfileBody): AgentProfile | null {
-        const index: number = this._state.agents.findIndex((a: AgentProfile): boolean => a.id === id);
+        const index: number = this._state.agents.findIndex(
+            (a: AgentProfile): boolean => a.id === id,
+        );
         if (index === -1) {
             return null;
         }
@@ -266,6 +271,11 @@ export class ConfigStore {
         return this._state.openai.apiKey;
     }
 
+    /** Directory the store lives in — the base for sibling data like recordings. */
+    public getBaseDir(): string {
+        return dirname(this._filePath);
+    }
+
     public saveSettings(body: SettingsBody): Settings {
         // Empty/omitted apiKey leaves the stored key untouched (the UI never
         // re-sends the secret it can't read back).
@@ -285,5 +295,4 @@ export class ConfigStore {
         this._state.openai.connected = connected;
         this._persist();
     }
-
 }

@@ -66,13 +66,43 @@ body.audiomesh-dark {
     border-radius: 4px;
 }
 
+.am-transcript .am-final {
+    color: #e2e8f0;
+    padding: 1px 0;
+}
+
+/* Live interim results: one per speaker, updated in place, visually set apart
+   from committed finals and marked with a blinking caret. */
+#am-tx-partials {
+    margin-top: 4px;
+    border-top: 1px dashed #33415577;
+    padding-top: 4px;
+}
+
 .am-transcript .am-partial {
     color: #94a3b8;
     font-style: italic;
 }
 
-.am-transcript .am-final {
-    color: #e2e8f0;
+.am-transcript .am-partial::after {
+    content: '▋';
+    margin-left: 2px;
+    color: var(--am-accent);
+    animation: am-blink 1s steps(2, start) infinite;
+}
+
+@keyframes am-blink {
+    to {
+        visibility: hidden;
+    }
+}
+
+.am-stt-pill {
+    margin-left: 4px;
+}
+
+.am-speak-badge {
+    margin-left: 4px;
 }
 
 .am-participants {
@@ -88,4 +118,11 @@ body.audiomesh-dark {
 .am-status-table td {
     border: none;
     padding: 4px 8px;
+}
+
+.am-route-chain {
+    font-size: 0.8rem;
+    color: #94a3b8;
+    font-family: monospace;
+    margin-top: 2px;
 }

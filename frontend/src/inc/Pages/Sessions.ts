@@ -1,19 +1,33 @@
-import type { Platform, Session, WsEvent } from '@audiomesh/schemas';
+import type { Participant, Platform, Session, Settings, WsEvent } from '@audiomesh/schemas';
 import { Api } from '../Net/Api.js';
 import { WsClient } from '../Net/WsClient.js';
 import { esc, stateClass } from '../Util/Html.js';
 import type { IPage } from './IPage.js';
 
+/** STT status pill state derived for the open session's header. */
+interface SttStatus {
+    text: string;
+    cls: string;
+    title: string;
+}
+
 /**
  * Sessions page. Start-form + live table of sessions; "Open" drills into a detail
- * view with the participant list and a live transcript pane that appends
- * partial/final transcript events straight from the WebSocket. The table refreshes
- * on any session/participant WS event (no polling loop needed).
+ * view with the participant list and a live transcript pane. Everything in the
+ * detail updates straight from the WebSocket with no polling:
+ *
+ *  - interim (`transcript.partial`) results update one line *per speaker* in place
+ *    (a live "typing" line), and a `transcript.final` commits it and clears the
+ *    partial — so the pane isn't flooded with every hypothesis;
+ *  - `speech.started` / `speech.stopped` toggle each participant's speaking badge
+ *    directly (no table refresh);
+ *  - a status pill reflects the transcription/OpenAI state and any live STT error.
  */
 export class Sessions implements IPage {
-
     private _container: JQuery | null = null;
     private _openSessionId: string | null = null;
+    private _openaiConfigured: boolean = false;
+    private readonly _sttError: Map<string, string> = new Map();
     private readonly _onEvent: (event: WsEvent) => void;
 
     public constructor() {
@@ -30,12 +44,22 @@ export class Sessions implements IPage {
             this._openSessionId = null;
             void this._refreshTable();
         });
+        await this._loadSettings();
         await this._loadPlatforms();
         await this._refreshTable();
     }
 
     public unmount(): void {
         WsClient.getInstance().offAny(this._onEvent);
+    }
+
+    private async _loadSettings(): Promise<void> {
+        try {
+            const settings: Settings = await Api.settings();
+            this._openaiConfigured = settings.openai.apiKeyConfigured;
+        } catch {
+            this._openaiConfigured = false;
+        }
     }
 
     private async _loadPlatforms(): Promise<void> {
@@ -47,7 +71,10 @@ export class Sessions implements IPage {
         const enabled: Platform[] = platforms.filter((p: Platform): boolean => p.enabled);
         select.html(
             enabled
-                .map((p: Platform): string => `<option value="${esc(p.id)}">${esc(p.name)} (${esc(p.kind)})</option>`)
+                .map(
+                    (p: Platform): string =>
+                        `<option value="${esc(p.id)}">${esc(p.name)} (${esc(p.kind)})</option>`,
+                )
                 .join(''),
         );
     }
@@ -64,7 +91,11 @@ export class Sessions implements IPage {
         }
         const transcription: boolean = c.find('#am-start-transcription').is(':checked');
         try {
-            await Api.sessionStart({ platformId: platformId, channelId: channelId, transcriptionEnabled: transcription });
+            await Api.sessionStart({
+                platformId: platformId,
+                channelId: channelId,
+                transcriptionEnabled: transcription,
+            });
             c.find('#am-start-channel').val('');
             await this._refreshTable();
         } catch (err) {
@@ -77,22 +108,32 @@ export class Sessions implements IPage {
         if (this._openSessionId === sessionId) {
             this._openSessionId = null;
         }
+        this._sttError.delete(sessionId);
         await this._refreshTable();
     }
 
     private _throttle: number | null = null;
 
     private _handleEvent(event: WsEvent): void {
-        if (
-            event.type === 'transcript.partial' ||
-            event.type === 'transcript.final'
-        ) {
-            if (this._openSessionId !== null && event.sessionId === this._openSessionId) {
-                this._appendTranscript(event);
+        // Detail-only, high-frequency events: handle directly, never trigger a
+        // full table refresh (which would re-fetch and re-render the whole view).
+        if (event.type === 'transcript.partial' || event.type === 'transcript.final') {
+            if (this._isOpen(event.sessionId)) {
+                this._onTranscript(event);
             }
             return;
         }
-        // Any session/participant change → refresh the table (throttled).
+        if (event.type === 'speech.started' || event.type === 'speech.stopped') {
+            if (this._isOpen(event.sessionId)) {
+                this._setSpeaking(event.speakerId, event.type === 'speech.started');
+            }
+            return;
+        }
+        if (event.type === 'system.error') {
+            this._onSystemError(event);
+            return;
+        }
+        // Structural changes (join/left, session state) → throttled refresh.
         if (this._throttle !== null) {
             return;
         }
@@ -102,6 +143,10 @@ export class Sessions implements IPage {
         }, 250);
     }
 
+    private _isOpen(sessionId: string): boolean {
+        return this._openSessionId !== null && sessionId === this._openSessionId;
+    }
+
     private async _refreshTable(): Promise<void> {
         const c: JQuery | null = this._container;
         if (c === null) {
@@ -109,7 +154,9 @@ export class Sessions implements IPage {
         }
         const sessions: Session[] = await Api.sessions();
         if (this._openSessionId !== null) {
-            const open: Session | undefined = sessions.find((s: Session): boolean => s.sessionId === this._openSessionId);
+            const open: Session | undefined = sessions.find(
+                (s: Session): boolean => s.sessionId === this._openSessionId,
+            );
             if (open !== undefined) {
                 this._renderDetail(open);
                 return;
@@ -126,9 +173,10 @@ export class Sessions implements IPage {
         body.html(
             sessions
                 .map((s: Session): string => {
-                    const uptime: string = s.connectedAt !== undefined
-                        ? `${Math.round((Date.now() - s.connectedAt) / 1000)}s`
-                        : '–';
+                    const uptime: string =
+                        s.connectedAt !== undefined
+                            ? `${Math.round((Date.now() - s.connectedAt) / 1000)}s`
+                            : '–';
                     return `<tr>
                         <td><code>${esc(s.sessionId.slice(0, 8))}</code></td>
                         <td>${esc(s.platform)} / ${esc(s.channelName)}</td>
@@ -159,30 +207,153 @@ export class Sessions implements IPage {
         }
         c.find('#am-list').hide();
         const detail: JQuery = c.find('#am-detail').show();
-        const participants: string = session.participants
-            .map((p): string => `<li>${esc(p.displayName)} <span class="badge badge-${p.speakingState === 'speaking' ? 'success' : 'secondary'}">${esc(p.speakingState)}</span></li>`)
-            .join('');
-        detail.find('#am-detail-title').html(
-            `${esc(session.platform)} / ${esc(session.channelName)} <span class="badge badge-${stateClass(session.connectionState)}">${esc(session.connectionState)}</span>`,
-        );
-        detail.find('#am-detail-participants').html(participants);
-        // Transcript pane is append-only from WS; only clear it when (re)opening a
-        // different session, not on every table refresh.
+
+        const stt: SttStatus = this._sttStatus(session);
+        detail
+            .find('#am-detail-title')
+            .html(
+                `${esc(session.platform)} / ${esc(session.channelName)} ` +
+                    `<span class="badge badge-${stateClass(session.connectionState)}">${esc(session.connectionState)}</span> ` +
+                    `<span class="badge badge-${stt.cls} am-stt-pill" title="${esc(stt.title)}">${esc(stt.text)}</span>`,
+            );
+        detail
+            .find('#am-detail-participants')
+            .html(
+                session.participants
+                    .map((p: Participant): string => Sessions._participantLi(p))
+                    .join(''),
+            );
+
+        // Transcript/partials survive table refreshes; only reset when switching to
+        // a different session.
         if (detail.data('for') !== session.sessionId) {
             detail.data('for', session.sessionId);
-            detail.find('#am-transcript').empty();
+            detail.find('#am-tx-final').empty();
+            detail.find('#am-tx-partials').empty();
         }
     }
 
-    private _appendTranscript(event: Extract<WsEvent, { type: 'transcript.partial' | 'transcript.final' }>): void {
-        const pane: JQuery | undefined = this._container?.find('#am-transcript');
-        if (pane === undefined) {
+    private static _participantLi(p: Participant): string {
+        const speaking: boolean = p.speakingState === 'speaking';
+        return `<li data-speaker="${esc(p.platformUserId)}">${esc(p.displayName)}
+            <span class="badge badge-${speaking ? 'success' : 'secondary'} am-speak-badge">${speaking ? 'speaking' : 'silent'}</span></li>`;
+    }
+
+    private _setSpeaking(speakerId: string, speaking: boolean): void {
+        const li: JQuery | null = this._findBySpeaker('#am-detail-participants li', speakerId);
+        if (li === null) {
             return;
         }
+        li.find('.am-speak-badge')
+            .removeClass('badge-success badge-secondary')
+            .addClass(speaking ? 'badge-success' : 'badge-secondary')
+            .text(speaking ? 'speaking' : 'silent');
+    }
+
+    private _onTranscript(
+        event: Extract<WsEvent, { type: 'transcript.partial' | 'transcript.final' }>,
+    ): void {
+        // A transcript arriving means STT is alive again — drop any stale error.
+        if (this._sttError.delete(event.sessionId)) {
+            this._refreshSttPill(event.sessionId);
+        }
         const who: string = event.line.speakerName ?? event.line.speakerId;
-        const cls: string = event.line.final ? 'am-final' : 'am-partial';
-        pane.append(`<div class="${cls}"><strong>${esc(who)}:</strong> ${esc(event.line.text)}</div>`);
-        pane.scrollTop(pane.prop('scrollHeight') as number);
+        if (event.type === 'transcript.partial') {
+            this._upsertPartial(event.line.speakerId, who, event.line.text);
+        } else {
+            this._removePartial(event.line.speakerId);
+            const pane: JQuery | undefined = this._container?.find('#am-tx-final');
+            pane?.append(
+                `<div class="am-final"><strong>${esc(who)}:</strong> ${esc(event.line.text)}</div>`,
+            );
+            this._scrollTranscript();
+        }
+    }
+
+    private _upsertPartial(speakerId: string, who: string, text: string): void {
+        const partials: JQuery | undefined = this._container?.find('#am-tx-partials');
+        if (partials === undefined) {
+            return;
+        }
+        let line: JQuery | null = this._findBySpeaker('#am-tx-partials .am-partial', speakerId);
+        if (line === null) {
+            partials.append(`<div class="am-partial" data-speaker="${esc(speakerId)}"></div>`);
+            line = this._findBySpeaker('#am-tx-partials .am-partial', speakerId);
+        }
+        line?.html(`<strong>${esc(who)}:</strong> ${esc(text)}`);
+        this._scrollTranscript();
+    }
+
+    private _removePartial(speakerId: string): void {
+        this._findBySpeaker('#am-tx-partials .am-partial', speakerId)?.remove();
+    }
+
+    private _scrollTranscript(): void {
+        const pane: JQuery | undefined = this._container?.find('#am-transcript');
+        pane?.scrollTop(pane.prop('scrollHeight') as number);
+    }
+
+    /** Find the element under `selector` whose `data-speaker` equals `speakerId`. */
+    private _findBySpeaker(selector: string, speakerId: string): JQuery | null {
+        const nodes: JQuery | undefined = this._container?.find(selector);
+        if (nodes === undefined) {
+            return null;
+        }
+        let found: JQuery | null = null;
+        nodes.each((_: number, el: HTMLElement): void => {
+            if ($(el).attr('data-speaker') === speakerId) {
+                found = $(el);
+            }
+        });
+        return found;
+    }
+
+    private _onSystemError(event: Extract<WsEvent, { type: 'system.error' }>): void {
+        const isStt: boolean =
+            /transcription|openai/i.test(event.component) && event.sessionId !== undefined;
+        if (!isStt || event.sessionId === undefined) {
+            return;
+        }
+        this._sttError.set(event.sessionId, event.message);
+        this._refreshSttPill(event.sessionId);
+    }
+
+    /**
+     * Update just the STT pill in place (no full re-render). Called when a live
+     * error is recorded or cleared. Transcription is known to be enabled here (a
+     * transcript or STT error for this session arrived), so the pill flips between
+     * the error and the active state.
+     */
+    private _refreshSttPill(sessionId: string): void {
+        const pill: JQuery | undefined = this._container?.find('.am-stt-pill');
+        if (!this._isOpen(sessionId) || pill === undefined) {
+            return;
+        }
+        const error: string | undefined = this._sttError.get(sessionId);
+        pill.removeClass('badge-success badge-secondary badge-warning badge-danger');
+        if (error !== undefined) {
+            pill.addClass('badge-danger').attr('title', error).text('STT error');
+        } else {
+            pill.addClass('badge-success').attr('title', 'transcription active').text('STT active');
+        }
+    }
+
+    private _sttStatus(session: Session): SttStatus {
+        if (!session.transcriptionEnabled) {
+            return { text: 'STT off', cls: 'secondary', title: 'transcription not enabled' };
+        }
+        const error: string | undefined = this._sttError.get(session.sessionId);
+        if (error !== undefined) {
+            return { text: 'STT error', cls: 'danger', title: error };
+        }
+        if (!this._openaiConfigured) {
+            return {
+                text: 'STT: no OpenAI key',
+                cls: 'warning',
+                title: 'configure a key in Settings',
+            };
+        }
+        return { text: 'STT active', cls: 'success', title: 'transcription active' };
     }
 
     private static _template(): string {
@@ -214,12 +385,16 @@ export class Sessions implements IPage {
                     <div class="card-body">
                         <div class="row">
                             <div class="col-md-4"><h6>Participants</h6><ul id="am-detail-participants" class="am-participants"></ul></div>
-                            <div class="col-md-8"><h6>Live Transcript</h6><div id="am-transcript" class="am-transcript"></div></div>
+                            <div class="col-md-8"><h6>Live Transcript</h6>
+                                <div id="am-transcript" class="am-transcript">
+                                    <div id="am-tx-final"></div>
+                                    <div id="am-tx-partials"></div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
             </div>
         </div></section>`;
     }
-
 }
