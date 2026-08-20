@@ -124,15 +124,45 @@ async function _installBrowserGlobals(domain: string, wrtc: any): Promise<void> 
         },
     });
 
+    // The full WebRTC surface the bundle probes on window/global. RTCRtpTransceiver
+    // in particular is mandatory: the lib's codec-preference feature-detect does
+    // `'setCodecPreferences' in window.RTCRtpTransceiver.prototype`, which *throws*
+    // (not returns false) if RTCRtpTransceiver is missing — aborting PeerConnection
+    // setup right after CONFERENCE_JOINED. wrtc provides all of these.
     for (const key of [
         'RTCPeerConnection',
         'RTCSessionDescription',
         'RTCIceCandidate',
+        'RTCRtpTransceiver',
+        'RTCRtpSender',
+        'RTCRtpReceiver',
+        'RTCDataChannel',
+        'RTCDataChannelEvent',
+        'RTCDtlsTransport',
+        'RTCIceTransport',
+        'RTCSctpTransport',
+        'RTCPeerConnectionIceEvent',
+        'RTCPeerConnectionIceErrorEvent',
         'MediaStream',
         'MediaStreamTrack',
     ]) {
-        g[key] = wrtc[key];
-        win[key] = wrtc[key];
+        if (wrtc[key] !== undefined) {
+            g[key] = wrtc[key];
+            win[key] = wrtc[key];
+        }
+    }
+
+    // The bundled webrtc-adapter tries to re-wrap every `icecandidate` event's
+    // `candidate` via Object.defineProperty and throws on wrtc's non-configurable
+    // property ("Cannot redefine property: candidate") the moment ICE gathering
+    // starts. adapter skips that shim when `RTCIceCandidate.prototype` already has
+    // `foundation` — wrtc exposes `foundation` only per-instance, so advertise it
+    // on the prototype to opt out of the shim.
+    if (wrtc.RTCIceCandidate !== undefined && !('foundation' in wrtc.RTCIceCandidate.prototype)) {
+        Object.defineProperty(wrtc.RTCIceCandidate.prototype, 'foundation', {
+            value: null,
+            configurable: true,
+        });
     }
     // DOM globals the bundle reads off the global scope (provided by jsdom).
     for (const key of [
