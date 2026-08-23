@@ -16,6 +16,7 @@
     },
     "dependencies": {
         "@audiomesh/schemas": "*",
+        "@discordjs/opus": "^0.10.0",
         "@roamhq/wrtc": "^0.10.0",
         "better-sqlite3": "^12.9.0",
         "figtree": "git+https://github.com/stefanwerfling/figtree.git#claude",
