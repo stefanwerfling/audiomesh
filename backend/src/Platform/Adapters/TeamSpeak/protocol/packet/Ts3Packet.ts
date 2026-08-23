@@ -54,6 +54,25 @@ export function packetLength(direction: PacketDirection, dataLength: number): nu
 }
 
 /**
+ * Serialize just the header bytes (packetId [+ clientId] + type+flags) for the
+ * given direction — no MAC, no data. This is the exact byte sequence EAX uses as
+ * associated data (`../PROTOCOL.md` §4.7), so the crypto layer authenticates the
+ * same header that goes on the wire.
+ */
+export function encodeHeader(direction: PacketDirection, packet: Ts3Packet): Buffer {
+    const typeFlags: number = toTypeFlagsByte(packet.type, packet.flags);
+    const header: Buffer = Buffer.alloc(headerLength(direction));
+    header.writeUInt16BE(packet.packetId & 0xffff, 0);
+    if (direction === PacketDirection.ClientToServer) {
+        header.writeUInt16BE(packet.clientId & 0xffff, 2);
+        header.writeUInt8(typeFlags, 4);
+    } else {
+        header.writeUInt8(typeFlags, 2);
+    }
+    return header;
+}
+
+/**
  * Serialize a {@link Ts3Packet} into its wire `Buffer` for the given direction.
  * `packetId` and `clientId` are written big-endian; `clientId` is emitted only for
  * client→server packets. Throws when the MAC is not exactly 8 bytes.
