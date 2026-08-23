@@ -5,11 +5,12 @@ import type { IPage } from './IPage.js';
 
 /**
  * Platforms page: one card per configured platform with enable + test + delete,
- * plus an add/edit form. When the kind is `jitsi`, per-kind config fields appear
- * (domain, display name, muted-on-join, plus advanced BOSH/WebSocket/auth) so a
- * real Jitsi server can be entered. Secrets are submitted here; the room a bot
- * joins is not platform config — it is the session's "Channel" on the Sessions
- * page.
+ * plus an add/edit form. Per-kind config fields appear for the selected kind:
+ * `jitsi` (domain, display name, muted-on-join, advanced BOSH/WebSocket/auth) and
+ * `teamspeak` (host, voice port, nickname, muted-on-join, advanced passwords /
+ * default channel / identity) so a real server can be entered. Secrets are
+ * submitted here; the room/channel a bot joins is not platform config — it is the
+ * session's "Channel" on the Sessions page.
  */
 export class Platforms implements IPage {
     private static readonly KINDS: PlatformKind[] = ['mock', 'discord', 'teamspeak', 'jitsi'];
@@ -31,16 +32,24 @@ export class Platforms implements IPage {
         // no timers/subscriptions
     }
 
-    /** Show the Jitsi config fieldset only when the selected kind needs it. */
+    /** Show the per-kind config fieldset that matches the selected kind. */
     private _syncKindFields(): void {
         const kind: string = String(this._container?.find('#am-add-kind').val() ?? 'mock');
         this._container?.find('#am-jitsi-config').toggle(kind === 'jitsi');
+        this._container?.find('#am-ts-config').toggle(kind === 'teamspeak');
     }
 
     private _readConfig(kind: PlatformKind): Record<string, unknown> | undefined {
-        if (kind !== 'jitsi') {
-            return undefined;
+        if (kind === 'jitsi') {
+            return this._readJitsiConfig();
         }
+        if (kind === 'teamspeak') {
+            return this._readTeamSpeakConfig();
+        }
+        return undefined;
+    }
+
+    private _readJitsiConfig(): Record<string, unknown> {
         const c: JQuery | null = this._container;
         const val = (sel: string): string => String(c?.find(sel).val() ?? '').trim();
         // Accept a whole pasted meeting URL (https://host/room) and keep only the
@@ -63,6 +72,28 @@ export class Platforms implements IPage {
         return config;
     }
 
+    private _readTeamSpeakConfig(): Record<string, unknown> {
+        const c: JQuery | null = this._container;
+        const val = (sel: string): string => String(c?.find(sel).val() ?? '').trim();
+        // Keep only the host; a `host:port` is accepted and split by the backend.
+        const config: Record<string, unknown> = { host: Platforms._host(val('#am-ts-host')) };
+        const optional: Record<string, string> = {
+            port: val('#am-ts-port'),
+            nickname: val('#am-ts-nick'),
+            serverPassword: val('#am-ts-pass'),
+            defaultChannelId: val('#am-ts-channel'),
+            channelPassword: val('#am-ts-chpass'),
+            identity: val('#am-ts-identity'),
+        };
+        for (const [key, value] of Object.entries(optional)) {
+            if (value.length > 0) {
+                config[key] = value;
+            }
+        }
+        config['startMuted'] = c?.find('#am-ts-muted').is(':checked') ?? true;
+        return config;
+    }
+
     private async _save(): Promise<void> {
         const c: JQuery | null = this._container;
         if (c === null) {
@@ -76,6 +107,10 @@ export class Platforms implements IPage {
         }
         if (kind === 'jitsi' && String(c.find('#am-j-domain').val() ?? '').trim().length === 0) {
             window.alert('Jitsi needs a domain, e.g. meet.example.com');
+            return;
+        }
+        if (kind === 'teamspeak' && String(c.find('#am-ts-host').val() ?? '').trim().length === 0) {
+            window.alert('TeamSpeak needs a host, e.g. ts.example.com');
             return;
         }
         const body: PlatformBody = { kind: kind, name: name, enabled: true };
@@ -103,9 +138,10 @@ export class Platforms implements IPage {
         }
         this._editId = null;
         c.find(
-            '#am-add-name, #am-j-domain, #am-j-name, #am-j-muc, #am-j-bosh, #am-j-ws, #am-j-user, #am-j-pass',
+            '#am-add-name, #am-j-domain, #am-j-name, #am-j-muc, #am-j-bosh, #am-j-ws, #am-j-user, #am-j-pass, ' +
+                '#am-ts-host, #am-ts-port, #am-ts-nick, #am-ts-pass, #am-ts-channel, #am-ts-chpass, #am-ts-identity',
         ).val('');
-        c.find('#am-j-muted').prop('checked', true);
+        c.find('#am-j-muted, #am-ts-muted').prop('checked', true);
         c.find('#am-add-btn').text('Add');
         c.find('#am-add-reset').hide();
         this._syncKindFields();
@@ -130,6 +166,14 @@ export class Platforms implements IPage {
         c.find('#am-j-user').val(s('authUser'));
         c.find('#am-j-pass').val(s('authPassword'));
         c.find('#am-j-muted').prop('checked', cfg['startMuted'] !== false);
+        c.find('#am-ts-host').val(s('host'));
+        c.find('#am-ts-port').val(s('port'));
+        c.find('#am-ts-nick').val(s('nickname'));
+        c.find('#am-ts-pass').val(s('serverPassword'));
+        c.find('#am-ts-channel').val(s('defaultChannelId'));
+        c.find('#am-ts-chpass').val(s('channelPassword'));
+        c.find('#am-ts-identity').val(s('identity'));
+        c.find('#am-ts-muted').prop('checked', cfg['startMuted'] !== false);
         c.find('#am-add-btn').text('Update');
         c.find('#am-add-reset').show();
         this._syncKindFields();
@@ -201,9 +245,15 @@ export class Platforms implements IPage {
     private static _card(p: Platform): string {
         const cfg: Record<string, unknown> =
             (p.config as Record<string, unknown> | undefined) ?? {};
-        const domain: string = typeof cfg['domain'] === 'string' ? (cfg['domain'] as string) : '';
+        // Jitsi stores the server as `domain`, TeamSpeak as `host` — show whichever.
+        const server: string =
+            typeof cfg['domain'] === 'string'
+                ? (cfg['domain'] as string)
+                : typeof cfg['host'] === 'string'
+                  ? (cfg['host'] as string)
+                  : '';
         const detail: string =
-            domain.length > 0 ? `<p class="mb-1"><strong>Server:</strong> ${esc(domain)}</p>` : '';
+            server.length > 0 ? `<p class="mb-1"><strong>Server:</strong> ${esc(server)}</p>` : '';
         return `
         <div class="col-md-4">
             <div class="card">
@@ -258,7 +308,26 @@ export class Platforms implements IPage {
                             </div>
                         </details>
                     </div>
-                    <small class="text-muted d-block mt-2">The room to join is the <strong>Channel</strong> on the Sessions page — not part of platform config. Live Jitsi also needs the optional runtime deps installed (see CONFIGURATION.md).</small>
+                    <div id="am-ts-config" style="display:none">
+                        <hr />
+                        <div class="form-row">
+                            <div class="col-md-5"><label>Host <span class="text-danger">*</span></label><input id="am-ts-host" class="form-control" placeholder="ts.example.com" /></div>
+                            <div class="col-md-2"><label>Voice port</label><input id="am-ts-port" class="form-control" placeholder="9987" /></div>
+                            <div class="col-md-3"><label>Bot nickname</label><input id="am-ts-nick" class="form-control" placeholder="AudioMesh" /></div>
+                            <div class="col-md-2"><div class="form-check mt-4"><input id="am-ts-muted" type="checkbox" class="form-check-input" checked /><label class="form-check-label">Join muted</label></div></div>
+                        </div>
+                        <details class="mt-2"><summary class="text-muted">Advanced (passwords / default channel / identity)</summary>
+                            <div class="form-row mt-2">
+                                <div class="col-md-4"><label>Server password</label><input id="am-ts-pass" type="password" class="form-control" /></div>
+                                <div class="col-md-4"><label>Default channel id</label><input id="am-ts-channel" class="form-control" placeholder="joined at connect" /></div>
+                                <div class="col-md-4"><label>Channel password</label><input id="am-ts-chpass" type="password" class="form-control" /></div>
+                            </div>
+                            <div class="form-row">
+                                <div class="col-md-12"><label>Bot identity (base64, optional)</label><input id="am-ts-identity" class="form-control" placeholder="generated on first connect if empty" /></div>
+                            </div>
+                        </details>
+                    </div>
+                    <small class="text-muted d-block mt-2">The room/channel to join is the <strong>Channel</strong> on the Sessions page — not part of platform config. Live Jitsi also needs the optional runtime deps installed (see CONFIGURATION.md). TeamSpeak 3 speaks our own native voice-protocol implementation.</small>
                 </div>
             </div>
             <div class="row" id="am-platform-grid"></div>

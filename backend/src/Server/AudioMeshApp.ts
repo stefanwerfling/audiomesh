@@ -7,6 +7,10 @@ import { LibJitsiClient } from '../Platform/Adapters/Jitsi/LibJitsiClient.js';
 import type { JitsiConfig } from '../Platform/Adapters/Jitsi/JitsiConfig.js';
 import type { IJitsiClient } from '../Platform/Adapters/Jitsi/IJitsiClient.js';
 import { MockVoiceAdapter } from '../Platform/Adapters/MockVoiceAdapter.js';
+import { TeamSpeakAdapter } from '../Platform/Adapters/TeamSpeak/TeamSpeakAdapter.js';
+import type { TeamSpeakConfig } from '../Platform/Adapters/TeamSpeak/TeamSpeakConfig.js';
+import type { ITeamSpeakClient } from '../Platform/Adapters/TeamSpeak/ITeamSpeakClient.js';
+import { Ts3ProtocolClient } from '../Platform/Adapters/TeamSpeak/protocol/Ts3ProtocolClient.js';
 import { PlatformRegistry } from '../Platform/PlatformRegistry.js';
 import type { AdapterConfig } from '../Platform/IVoicePlatformAdapter.js';
 import { ConfigStore } from '../Store/ConfigStore.js';
@@ -59,6 +63,14 @@ export class AudioMeshApp extends BackendApp<DefaultArgs, AudioMeshConfig> {
                 new JitsiAdapter(
                     adapterConfig,
                     (jitsiConfig: JitsiConfig): IJitsiClient => new LibJitsiClient(jitsiConfig),
+                ),
+        );
+        PlatformRegistry.getInstance().register(
+            'teamspeak',
+            (adapterConfig: AdapterConfig): TeamSpeakAdapter =>
+                new TeamSpeakAdapter(
+                    adapterConfig,
+                    (tsConfig: TeamSpeakConfig): ITeamSpeakClient => new Ts3ProtocolClient(tsConfig),
                 ),
         );
 
