@@ -319,8 +319,11 @@ escaping (6) with TSLib-captured vectors **before** a live connect; do init1 (5)
 
 1. **New-protocol (≥3.1) crypto** — Curve25519 license chain, `clientek`, license parsing,
    `proof`. Many servers now require it. Port tsclientlib + TSLib block-by-block. *(medium)*
-2. **`client_version` / `client_version_sign`** — must be a valid TeamSpeak-signed version
-   tuple the server accepts; source of a current tuple is unresolved. *(low)*
+2. **`client_version` / `client_version_sign`** — RESOLVED. `Ts3ProtocolClient` ships a
+   genuine TeamSpeak-signed Linux tuple (`3.5.5 [Build: 1594213121]`) from
+   ReSpeak/tsdeclarations `Versions.csv`. The sign is Ed25519 over `version+platform`, so
+   version/platform/sign stay a matched set; the Init1 §3 version field encodes that
+   build's timestamp. Overridable via `Ts3ProtocolClientOptions`. *(done)*
 3. **EAX in Node** — no native impl; compose AES-CTR+CMAC exactly or vendor one; test
    vectors. *(medium)*
 4. **Generation-counter sync** — never on the wire; one missed wrap desyncs decryption. *(medium)*

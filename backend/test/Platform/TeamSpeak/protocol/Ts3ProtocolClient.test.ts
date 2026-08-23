@@ -27,6 +27,7 @@ import {
 import {
     buildPacket1,
     buildPacket3,
+    encodeClientVersion,
     unwrapInit1,
     wrapServerInit1,
 } from '../../../../src/Platform/Adapters/TeamSpeak/protocol/init1/Init1.js';
@@ -406,6 +407,30 @@ describe('Ts3ProtocolClient — Init1 + handshake', () => {
         const data: Buffer = unwrapInit1(PacketDirection.ClientToServer, raw);
         expect(data.length).toBe(21);
         expect(data[4]).toBe(0x00); // step byte of packet 0
+        // The version field encodes the claimed build's timestamp (3.5.5 = 1594213121),
+        // not the wall clock.
+        expect(Buffer.compare(data.subarray(0, 4), encodeClientVersion(1594213121))).toBe(0);
+    });
+
+    it('sends clientinit with the genuine TeamSpeak-signed version tuple', async (): Promise<void> => {
+        await connect(h);
+        // The clientinit is the first client→server Command; the server decrypts it.
+        let clientinit: TsCommand | null = null;
+        for (const raw of h.transport.sent) {
+            const packet: Ts3Packet = decodePacket(PacketDirection.ClientToServer, raw);
+            if (packet.type === PacketType.Command) {
+                clientinit = h.server.decryptClientCommand(raw);
+                break;
+            }
+        }
+        expect(clientinit?.name).toBe('clientinit');
+        expect(firstValue(clientinit as TsCommand, 'client_version')).toBe(
+            '3.5.5 [Build: 1594213121]',
+        );
+        expect(firstValue(clientinit as TsCommand, 'client_platform')).toBe('Linux');
+        expect(firstValue(clientinit as TsCommand, 'client_version_sign')).toBe(
+            'qcElldtu07fZwpqJibMXCuGjdzgk1W+bHOmtrMRQzUEo+qxkETaR/dUpUqrF3WUKQ0XC58E0wG584toQGk2jBA==',
+        );
     });
 
     it('completes the full handshake and reports connected with the assigned client id', async (): Promise<void> => {

@@ -54,6 +54,32 @@ const DEFAULT_SECURITY_LEVEL: number = 8;
 const TALK_STOP_FRAMES: number = 3;
 
 /**
+ * A genuine TeamSpeak-signed client version tuple — the newest stable TeamSpeak 3
+ * **Linux** client from ReSpeak/tsdeclarations `Versions.csv` (the same dataset
+ * tsclientlib uses). The `client_version_sign` is an Ed25519 signature by TeamSpeak
+ * over `client_version + client_platform`, so these three MUST stay a matched set;
+ * overriding one without the others yields a signature the server rejects.
+ */
+const DEFAULT_CLIENT_VERSION: string = '3.5.5 [Build: 1594213121]';
+const DEFAULT_CLIENT_VERSION_SIGN: string =
+    'qcElldtu07fZwpqJibMXCuGjdzgk1W+bHOmtrMRQzUEo+qxkETaR/dUpUqrF3WUKQ0XC58E0wG584toQGk2jBA==';
+const DEFAULT_CLIENT_PLATFORM: string = 'Linux';
+
+/**
+ * Pull the `[Build: N]` unix timestamp out of a version string — this is the value
+ * the Init1 §3 version field encodes (`unixSeconds − epoch`), so it must match the
+ * build we claim in `client_version` rather than the wall clock.
+ */
+function parseBuildTimestamp(version: string): number | null {
+    const match: RegExpExecArray | null = /\[Build:\s*(\d+)\]/.exec(version);
+    if (match === null) {
+        return null;
+    }
+    const build: number = Number.parseInt(match[1] as string, 10);
+    return Number.isFinite(build) ? build : null;
+}
+
+/**
  * The structural transport contract the client drives — satisfied by the concrete
  * {@link Ts3UdpTransport} and by a fake in tests, so the whole client is exercisable
  * without a real socket.
@@ -167,6 +193,7 @@ export class Ts3ProtocolClient implements ITeamSpeakClient {
     private readonly _clientVersion: string;
     private readonly _clientVersionSign: string;
     private readonly _clientPlatform: string;
+    private readonly _buildTimestamp: number;
 
     private _handlers: TeamSpeakClientHandlers | null = null;
 
@@ -207,13 +234,13 @@ export class Ts3ProtocolClient implements ITeamSpeakClient {
         this._codecFactory = options.codecFactory ?? new DiscordOpusCodecFactory();
         this._connectTimeoutMs = options.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS;
         this._securityLevel = options.securityLevel ?? DEFAULT_SECURITY_LEVEL;
-        // TODO(ts3): client_version / client_version_sign must be a genuine
-        // TeamSpeak-signed tuple the server accepts (PROTOCOL.md §10 risk #2).
-        this._clientVersion = options.clientVersion ?? '3.6.2 [Build: 1690193193]';
-        this._clientVersionSign =
-            options.clientVersionSign ??
-            'jdY2FLwEXW1Jc02uPfd9RTLB3ycAWJHZWv8Hh5YWmkQvxrJlUKm09qw1JHwAsTsZeRQ8kJZ0jjBg9tjc4uEBA==';
-        this._clientPlatform = options.clientPlatform ?? 'Linux';
+        // A real TeamSpeak-signed version tuple (see the DEFAULT_CLIENT_VERSION docs).
+        // Overriding one field requires overriding all three with a matching signed set.
+        this._clientVersion = options.clientVersion ?? DEFAULT_CLIENT_VERSION;
+        this._clientVersionSign = options.clientVersionSign ?? DEFAULT_CLIENT_VERSION_SIGN;
+        this._clientPlatform = options.clientPlatform ?? DEFAULT_CLIENT_PLATFORM;
+        this._buildTimestamp =
+            parseBuildTimestamp(this._clientVersion) ?? Math.floor(this._clock() / 1000);
         this._registerNotifyListeners();
     }
 
@@ -253,7 +280,8 @@ export class Ts3ProtocolClient implements ITeamSpeakClient {
         await this._transport.open(this._config.host, this._config.port);
 
         const clientInitIv: Buffer = this._handshake.buildClientInitIv();
-        const version: Buffer = encodeClientVersion(Math.floor(this._clock() / 1000));
+        // The Init1 version field encodes the claimed build's timestamp, not now().
+        const version: Buffer = encodeClientVersion(this._buildTimestamp);
         this._init1 = new Init1Handshake(version, clientInitIv, this._random);
 
         this._connecting = true;
