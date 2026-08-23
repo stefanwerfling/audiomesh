@@ -1,9 +1,13 @@
 import { Router } from 'express';
 import { DefaultRoute } from 'figtree';
 import {
+    OpenAiModelsBodySchema,
+    OpenAiModelsResultSchema,
     OpenAiTestResultSchema,
     SettingsBodySchema,
     SettingsSchema,
+    type OpenAiModelsBody,
+    type OpenAiModelsResult,
     type OpenAiTestResult,
     type Settings,
     type SettingsBody,
@@ -18,7 +22,6 @@ import { ConfigStore } from '../../Store/ConfigStore.js';
  * exposing the key.
  */
 export class SettingsRoute extends DefaultRoute {
-
     public constructor() {
         super();
         this._uriBase = '/api/';
@@ -61,7 +64,32 @@ export class SettingsRoute extends DefaultRoute {
                 responseBodySchema: OpenAiTestResultSchema,
             },
         );
+        this._post(
+            this._getUrl('v1', 'settings', 'openai-models'),
+            false,
+            async (req, _res, _data): Promise<OpenAiModelsResult> => {
+                const body: OpenAiModelsBody = req.body as OpenAiModelsBody;
+                const store: ConfigStore = ConfigStore.getInstance();
+                // Prefer the values being entered; fall back to the stored ones so
+                // models load whether or not the key/base URL has been saved yet.
+                const baseUrl: string =
+                    body.baseUrl !== undefined && body.baseUrl.length > 0
+                        ? body.baseUrl
+                        : store.getOpenAiBaseUrl();
+                const apiKey: string =
+                    body.apiKey !== undefined && body.apiKey.length > 0
+                        ? body.apiKey
+                        : store.getOpenAiKey();
+                return OpenAIProvider.listModels(baseUrl, apiKey);
+            },
+            {
+                description:
+                    'List models the configured gateway offers (for the Settings selects).',
+                tags: ['settings'],
+                bodySchema: OpenAiModelsBodySchema,
+                responseBodySchema: OpenAiModelsResultSchema,
+            },
+        );
         return super.getExpressRouter();
     }
-
 }

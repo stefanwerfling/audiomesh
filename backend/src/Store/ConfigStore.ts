@@ -23,8 +23,10 @@ interface StoredPlatform {
 
 interface StoredOpenAi {
     apiKey: string;
+    baseUrl: string;
     model: string;
     transcriptionModel: string;
+    transcriptionMode: 'realtime' | 'batch';
     ttsModel: string;
     voice: string;
     connected: boolean;
@@ -82,8 +84,10 @@ export class ConfigStore {
             routes: [],
             openai: {
                 apiKey: '',
+                baseUrl: 'https://api.openai.com',
                 model: 'gpt-4o',
                 transcriptionModel: 'gpt-4o-transcribe',
+                transcriptionMode: 'realtime',
                 ttsModel: 'gpt-4o-mini-tts',
                 voice: 'alloy',
                 connected: false,
@@ -103,7 +107,16 @@ export class ConfigStore {
         try {
             const raw: string = readFileSync(this._filePath, 'utf-8');
             const parsed: Partial<StoredState> = JSON.parse(raw) as Partial<StoredState>;
-            this._state = { ...ConfigStore._defaults(), ...parsed };
+            const defaults: StoredState = ConfigStore._defaults();
+            // Deep-merge the nested config objects so a store written before a new
+            // field existed still gets that field's default (rather than undefined).
+            this._state = {
+                platforms: parsed.platforms ?? defaults.platforms,
+                agents: parsed.agents ?? defaults.agents,
+                routes: parsed.routes ?? defaults.routes,
+                openai: { ...defaults.openai, ...(parsed.openai ?? {}) },
+                privacy: { ...defaults.privacy, ...(parsed.privacy ?? {}) },
+            };
         } catch (error: unknown) {
             Logger.getLogger().error(
                 `ConfigStore: failed to load, using defaults: ${(error as Error).message}`,
@@ -257,8 +270,10 @@ export class ConfigStore {
             openai: {
                 apiKeyConfigured: this._state.openai.apiKey.length > 0,
                 connected: this._state.openai.connected,
+                baseUrl: this._state.openai.baseUrl,
                 model: this._state.openai.model,
                 transcriptionModel: this._state.openai.transcriptionModel,
+                transcriptionMode: this._state.openai.transcriptionMode,
                 ttsModel: this._state.openai.ttsModel,
                 voice: this._state.openai.voice,
             },
@@ -269,6 +284,17 @@ export class ConfigStore {
     /** Backend-only accessor for the raw OpenAI key. Never exposed via a route. */
     public getOpenAiKey(): string {
         return this._state.openai.apiKey;
+    }
+
+    /** API base URL for all OpenAI calls (api.openai.com or a compatible gateway). */
+    public getOpenAiBaseUrl(): string {
+        // Trim a trailing slash so callers can append `/v1/...` unambiguously.
+        return this._state.openai.baseUrl.replace(/\/+$/, '');
+    }
+
+    /** How live audio is transcribed: streaming Realtime WS vs pause-segmented batch. */
+    public getTranscriptionMode(): 'realtime' | 'batch' {
+        return this._state.openai.transcriptionMode;
     }
 
     /** Directory the store lives in — the base for sibling data like recordings. */
@@ -282,8 +308,10 @@ export class ConfigStore {
         if (body.openai.apiKey !== undefined && body.openai.apiKey.length > 0) {
             this._state.openai.apiKey = body.openai.apiKey;
         }
+        this._state.openai.baseUrl = body.openai.baseUrl;
         this._state.openai.model = body.openai.model;
         this._state.openai.transcriptionModel = body.openai.transcriptionModel;
+        this._state.openai.transcriptionMode = body.openai.transcriptionMode;
         this._state.openai.ttsModel = body.openai.ttsModel;
         this._state.openai.voice = body.openai.voice;
         this._state.privacy = body.privacy;

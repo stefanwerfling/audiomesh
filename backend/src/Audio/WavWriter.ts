@@ -1,14 +1,9 @@
 import { closeSync, openSync, writeSync } from 'node:fs';
+import { WAV_HEADER_BYTES, wavHeader, type WavFormat } from './WavEncoder.js';
 
-/** PCM shape a {@link WavWriter} serialises. Matches the internal audio format. */
-export interface WavFormat {
-    sampleRate: number;
-    channels: number;
-    /** Bits per sample (16 for the internal s16le format). */
-    bitsPerSample: number;
-}
+export type { WavFormat };
 
-const HEADER_BYTES: number = 44;
+const HEADER_BYTES: number = WAV_HEADER_BYTES;
 
 /**
  * Minimal streaming writer for a canonical 44-byte-header PCM WAV file. Audio is
@@ -41,7 +36,7 @@ export class WavWriter {
         if (this._fd === null) {
             this._fd = openSync(this._filePath, 'w');
             // Reserve the header; real sizes are backfilled on close().
-            writeSync(this._fd, this._buildHeader(0), 0, HEADER_BYTES, 0);
+            writeSync(this._fd, wavHeader(0, this._format), 0, HEADER_BYTES, 0);
         }
         writeSync(this._fd, pcm, 0, pcm.length, HEADER_BYTES + this._dataBytes);
         this._dataBytes += pcm.length;
@@ -56,33 +51,12 @@ export class WavWriter {
         if (this._fd === null) {
             return;
         }
-        writeSync(this._fd, this._buildHeader(this._dataBytes), 0, HEADER_BYTES, 0);
+        writeSync(this._fd, wavHeader(this._dataBytes, this._format), 0, HEADER_BYTES, 0);
         closeSync(this._fd);
         this._fd = null;
     }
 
     public get bytesWritten(): number {
         return this._dataBytes;
-    }
-
-    private _buildHeader(dataBytes: number): Buffer {
-        const { sampleRate, channels, bitsPerSample } = this._format;
-        const blockAlign: number = (channels * bitsPerSample) / 8;
-        const byteRate: number = sampleRate * blockAlign;
-        const header: Buffer = Buffer.alloc(HEADER_BYTES);
-        header.write('RIFF', 0, 'ascii');
-        header.writeUInt32LE(36 + dataBytes, 4);
-        header.write('WAVE', 8, 'ascii');
-        header.write('fmt ', 12, 'ascii');
-        header.writeUInt32LE(16, 16); // PCM fmt chunk size
-        header.writeUInt16LE(1, 20); // audio format = PCM
-        header.writeUInt16LE(channels, 22);
-        header.writeUInt32LE(sampleRate, 24);
-        header.writeUInt32LE(byteRate, 28);
-        header.writeUInt16LE(blockAlign, 32);
-        header.writeUInt16LE(bitsPerSample, 34);
-        header.write('data', 36, 'ascii');
-        header.writeUInt32LE(dataBytes, 40);
-        return header;
     }
 }

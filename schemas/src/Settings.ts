@@ -8,8 +8,17 @@ import { Vts, type ExtractSchemaResultType } from 'vts';
 export const OpenAiSettingsSchema = Vts.object({
     apiKeyConfigured: Vts.boolean(),
     connected: Vts.boolean(),
+    /** API base URL — `https://api.openai.com` or an OpenAI-compatible gateway. */
+    baseUrl: Vts.string(),
     model: Vts.string(),
     transcriptionModel: Vts.string(),
+    /**
+     * How live audio is transcribed: `realtime` streams over the Realtime
+     * WebSocket (true partials); `batch` segments speech on pauses and posts each
+     * segment to `/v1/audio/transcriptions` (final-only, for gateways without the
+     * Realtime API).
+     */
+    transcriptionMode: Vts.or([Vts.equal('realtime' as const), Vts.equal('batch' as const)]),
     ttsModel: Vts.string(),
     voice: Vts.string(),
 });
@@ -41,8 +50,10 @@ export type Settings = ExtractSchemaResultType<typeof SettingsSchema>;
  */
 export const OpenAiSettingsBodySchema = Vts.object({
     apiKey: Vts.optional(Vts.string()),
+    baseUrl: Vts.string(),
     model: Vts.string(),
     transcriptionModel: Vts.string(),
+    transcriptionMode: Vts.or([Vts.equal('realtime' as const), Vts.equal('batch' as const)]),
     ttsModel: Vts.string(),
     voice: Vts.string(),
 });
@@ -60,3 +71,22 @@ export const OpenAiTestResultSchema = Vts.object({
     message: Vts.string(),
 });
 export type OpenAiTestResult = ExtractSchemaResultType<typeof OpenAiTestResultSchema>;
+
+/**
+ * Request to list the models a gateway offers (Settings → "Load models"). Both
+ * fields are optional: the backend falls back to the stored base URL / key when a
+ * field is empty, so models can be loaded either before or after saving.
+ */
+export const OpenAiModelsBodySchema = Vts.object({
+    baseUrl: Vts.optional(Vts.string()),
+    apiKey: Vts.optional(Vts.string()),
+});
+export type OpenAiModelsBody = ExtractSchemaResultType<typeof OpenAiModelsBodySchema>;
+
+/** Model ids advertised by the gateway's `/v1/models`, for the Settings selects. */
+export const OpenAiModelsResultSchema = Vts.object({
+    ok: Vts.boolean(),
+    models: Vts.array(Vts.string()),
+    message: Vts.string(),
+});
+export type OpenAiModelsResult = ExtractSchemaResultType<typeof OpenAiModelsResultSchema>;

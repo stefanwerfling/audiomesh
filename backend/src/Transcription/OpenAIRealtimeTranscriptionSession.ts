@@ -8,7 +8,13 @@ import type {
 
 /** OpenAI Realtime input audio is 24 kHz mono s16le PCM. */
 const OPENAI_INPUT_SAMPLE_RATE: number = 24000;
-const REALTIME_URL: string = 'wss://api.openai.com/v1/realtime?intent=transcription';
+
+/** Build the Realtime WS URL from the configured (http/https) API base. */
+function realtimeUrl(): string {
+    const base: string = ConfigStore.getInstance().getOpenAiBaseUrl();
+    const wsBase: string = base.replace(/^http/, 'ws');
+    return `${wsBase}/v1/realtime?intent=transcription`;
+}
 
 /**
  * Real {@link IRealtimeTranscriptionSession} over OpenAI's Realtime transcription
@@ -41,7 +47,7 @@ export class OpenAIRealtimeTranscriptionSession implements IRealtimeTranscriptio
             'gpt-4o-transcribe';
 
         await new Promise<void>((resolve, reject): void => {
-            const ws: WebSocket = new WebSocket(REALTIME_URL, {
+            const ws: WebSocket = new WebSocket(realtimeUrl(), {
                 headers: {
                     Authorization: `Bearer ${apiKey}`,
                     'OpenAI-Beta': 'realtime=v1',

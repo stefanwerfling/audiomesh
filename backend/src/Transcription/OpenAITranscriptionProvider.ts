@@ -5,12 +5,25 @@ import { int16FromPcmBuffer, pcmBufferFromInt16 } from '../Audio/PcmConvert.js';
 import { PcmResampler } from '../Audio/PcmResampler.js';
 import { EventBus } from '../Core/EventBus.js';
 import { AudioMeshEvent } from '../Core/Events.js';
+import { ConfigStore } from '../Store/ConfigStore.js';
 import type {
     IRealtimeTranscriptionSession,
     RealtimeTranscriptionSessionFactory,
 } from './IRealtimeTranscriptionSession.js';
 import { OpenAIRealtimeTranscriptionSession } from './OpenAIRealtimeTranscriptionSession.js';
+import { WhisperSegmentTranscriptionSession } from './WhisperSegmentTranscriptionSession.js';
 import type { ITranscriptionProvider, TranscriptListener } from './ITranscriptionProvider.js';
+
+/**
+ * Pick the session backend from settings: `batch` uses the pause-segmenting
+ * Whisper path (gateways without the Realtime API), otherwise the streaming
+ * Realtime WebSocket.
+ */
+function defaultSessionFactory(): IRealtimeTranscriptionSession {
+    return ConfigStore.getInstance().getTranscriptionMode() === 'batch'
+        ? new WhisperSegmentTranscriptionSession()
+        : new OpenAIRealtimeTranscriptionSession();
+}
 
 /** Per-speaker transcription state the provider tracks. */
 interface SpeakerStream {
@@ -39,10 +52,7 @@ export class OpenAITranscriptionProvider implements ITranscriptionProvider {
     private readonly _factory: RealtimeTranscriptionSessionFactory;
     private readonly _streams: Map<string, SpeakerStream> = new Map();
 
-    public constructor(
-        factory: RealtimeTranscriptionSessionFactory = (): IRealtimeTranscriptionSession =>
-            new OpenAIRealtimeTranscriptionSession(),
-    ) {
+    public constructor(factory: RealtimeTranscriptionSessionFactory = defaultSessionFactory) {
         this._factory = factory;
     }
 
@@ -63,8 +73,15 @@ export class OpenAITranscriptionProvider implements ITranscriptionProvider {
         await session.open({
             onPartial: (text: string): void =>
                 onResult({ speakerId: speakerId, text: text, final: false, timestamp: Date.now() }),
-            onFinal: (text: string): void =>
-                onResult({ speakerId: speakerId, text: text, final: true, timestamp: Date.now() }),
+            onFinal: (text: string, startedAt?: number): void =>
+                onResult({
+                    speakerId: speakerId,
+                    text: text,
+                    final: true,
+                    // Prefer the utterance's spoken-start time (batch path) so a
+                    // report orders lines by when they were said.
+                    timestamp: startedAt ?? Date.now(),
+                }),
             onError: (message: string): void => this._onError(speakerId, message),
         });
 
@@ -74,7 +91,7 @@ export class OpenAITranscriptionProvider implements ITranscriptionProvider {
                     resampler === null
                         ? frame.data
                         : pcmBufferFromInt16(resampler.process(int16FromPcmBuffer(frame.data)));
-                session.sendAudio(pcm);
+                session.sendAudio(pcm, frame.timestamp);
             } catch (error: unknown) {
                 this._onError(speakerId, `feed failed: ${(error as Error).message}`);
             }

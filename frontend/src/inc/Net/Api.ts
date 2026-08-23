@@ -18,6 +18,7 @@ import type {
     Settings,
     SettingsBody,
     OpenAiTestResult,
+    OpenAiModelsResult,
 } from '@audiomesh/schemas';
 
 /**
@@ -27,7 +28,6 @@ import type {
  * bearer token, once obtained via {@link login}, is attached to every request.
  */
 export class Api {
-
     public static readonly BASE: string = '/api/v1';
 
     private static _token: string | null = null;
@@ -67,7 +67,10 @@ export class Api {
     }
 
     public static async session(id: string): Promise<Session | null> {
-        return Api.json<Session | null>('GET', `${Api.BASE}/sessions/get?id=${encodeURIComponent(id)}`);
+        return Api.json<Session | null>(
+            'GET',
+            `${Api.BASE}/sessions/get?id=${encodeURIComponent(id)}`,
+        );
     }
 
     public static async sessionStart(body: SessionStartBody): Promise<Session> {
@@ -89,15 +92,25 @@ export class Api {
     }
 
     public static async platformUpdate(id: string, body: PlatformBody): Promise<Platform | null> {
-        return Api.json<Platform | null>('POST', `${Api.BASE}/platforms/update?id=${encodeURIComponent(id)}`, body);
+        return Api.json<Platform | null>(
+            'POST',
+            `${Api.BASE}/platforms/update?id=${encodeURIComponent(id)}`,
+            body,
+        );
     }
 
     public static async platformDelete(id: string): Promise<ApiResult> {
-        return Api.json<ApiResult>('POST', `${Api.BASE}/platforms/delete?id=${encodeURIComponent(id)}`);
+        return Api.json<ApiResult>(
+            'POST',
+            `${Api.BASE}/platforms/delete?id=${encodeURIComponent(id)}`,
+        );
     }
 
     public static async platformTest(id: string): Promise<PlatformTestResult> {
-        return Api.json<PlatformTestResult>('POST', `${Api.BASE}/platforms/test?id=${encodeURIComponent(id)}`);
+        return Api.json<PlatformTestResult>(
+            'POST',
+            `${Api.BASE}/platforms/test?id=${encodeURIComponent(id)}`,
+        );
     }
 
     // --- routes -------------------------------------------------------------
@@ -111,7 +124,10 @@ export class Api {
     }
 
     public static async routeDelete(id: string): Promise<ApiResult> {
-        return Api.json<ApiResult>('POST', `${Api.BASE}/routes/delete?id=${encodeURIComponent(id)}`);
+        return Api.json<ApiResult>(
+            'POST',
+            `${Api.BASE}/routes/delete?id=${encodeURIComponent(id)}`,
+        );
     }
 
     public static async routeStart(id: string): Promise<ApiResult> {
@@ -133,7 +149,10 @@ export class Api {
     }
 
     public static async agentDelete(id: string): Promise<ApiResult> {
-        return Api.json<ApiResult>('POST', `${Api.BASE}/agents/delete?id=${encodeURIComponent(id)}`);
+        return Api.json<ApiResult>(
+            'POST',
+            `${Api.BASE}/agents/delete?id=${encodeURIComponent(id)}`,
+        );
     }
 
     // --- settings -----------------------------------------------------------
@@ -148,6 +167,14 @@ export class Api {
 
     public static async openaiTest(): Promise<OpenAiTestResult> {
         return Api.json<OpenAiTestResult>('POST', `${Api.BASE}/settings/openai-test`);
+    }
+
+    /** List models the gateway offers. Empty args fall back to the stored config. */
+    public static async openaiModels(baseUrl: string, apiKey: string): Promise<OpenAiModelsResult> {
+        return Api.json<OpenAiModelsResult>('POST', `${Api.BASE}/settings/openai-models`, {
+            baseUrl: baseUrl,
+            apiKey: apiKey,
+        });
     }
 
     // --- core ---------------------------------------------------------------
@@ -172,5 +199,4 @@ export class Api {
         }
         return (await res.json()) as T;
     }
-
 }
