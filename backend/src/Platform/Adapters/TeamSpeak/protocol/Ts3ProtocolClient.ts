@@ -39,10 +39,11 @@ const TS3_VOICE_RATE: number = 48000;
  *    raises {@link TeamSpeakClientHandlers}.
  *
  * The exact byte layouts, crypto derivations, enum values and Opus parameters are
- * being pinned from authoritative sources (Splamy/TS3AudioBot `TS3Client`, ReSpeak
- * protocol docs) — see the AudioMesh TS3-protocol decision note. Until those land,
- * {@link connect} rejects with a clear not-yet-implemented error so a configured
- * TS3 platform fails cleanly at connect rather than silently doing nothing.
+ * pinned from authoritative sources (Splamy/TS3AudioBot `TSLib`, ReSpeak protocol
+ * docs) in `./PROTOCOL.md` — the implementation spec this stack is built against.
+ * Until the layers land, {@link connect} rejects with a clear not-yet-implemented
+ * error so a configured TS3 platform fails cleanly at connect rather than silently
+ * doing nothing.
  */
 export class Ts3ProtocolClient implements ITeamSpeakClient {
     private readonly _config: TeamSpeakConfig;
