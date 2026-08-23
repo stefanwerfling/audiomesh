@@ -4,9 +4,113 @@ import {
     createPublicKey,
     diffieHellman,
     generateKeyPairSync,
+    type JsonWebKey,
     type KeyObject,
 } from 'node:crypto';
 import { Buffer } from 'node:buffer';
+
+/**
+ * TeamSpeak's public-key ("omega") ASN.1/DER layout — **not** SPKI. Verbatim from
+ * TSLib `TsCrypt.ExportPublicKey` (`../PROTOCOL.md` §4.1):
+ *
+ * ```
+ * SEQUENCE {
+ *   BIT STRING { 0x00 }, 7 unused bits   // LibTomCrypt: 0 = a public key
+ *   INTEGER   32                         // LibTomCrypt key size marker
+ *   INTEGER   affineX                    // public point X
+ *   INTEGER   affineY                    // public point Y
+ * }
+ * ```
+ *
+ * The import path reads X at sequence index 2 and Y at index 3. This compact form
+ * (~108 base64 chars vs SPKI's ~124) is also what keeps the `clientinitiv` that
+ * rides Init1 packet 4 under the 500-byte UDP MTU.
+ */
+const OMEGA_KEY_SIZE: number = 32;
+/** `BIT STRING` value `0x00` with 7 unused bits → `03 02 07 00`. */
+const OMEGA_BIT_STRING: Buffer = Buffer.from([0x03, 0x02, 0x07, 0x00]);
+/** P-256 coordinates are 32 bytes. */
+const COORDINATE_BYTES: number = 32;
+
+/** Encode a DER length (short form, or long form for ≥128). */
+function derLength(length: number): Buffer {
+    if (length < 0x80) {
+        return Buffer.from([length]);
+    }
+    if (length <= 0xff) {
+        return Buffer.from([0x81, length]);
+    }
+    return Buffer.from([0x82, (length >> 8) & 0xff, length & 0xff]);
+}
+
+/** Encode a non-negative big-endian magnitude as a DER INTEGER (adds a sign byte). */
+function derInteger(magnitude: Buffer): Buffer {
+    let start: number = 0;
+    while (start < magnitude.length - 1 && magnitude[start] === 0) {
+        start += 1;
+    }
+    let content: Buffer = magnitude.subarray(start);
+    if (((content[0] ?? 0) & 0x80) !== 0) {
+        content = Buffer.concat([Buffer.from([0x00]), content]);
+    }
+    return Buffer.concat([Buffer.from([0x02]), derLength(content.length), content]);
+}
+
+/** Wrap DER elements in a SEQUENCE. */
+function derSequence(elements: Buffer[]): Buffer {
+    const body: Buffer = Buffer.concat(elements);
+    return Buffer.concat([Buffer.from([0x30]), derLength(body.length), body]);
+}
+
+interface Tlv {
+    tag: number;
+    content: Buffer;
+    next: number;
+}
+
+/** Read one DER tag-length-value at `offset`. */
+function readTlv(buffer: Buffer, offset: number): Tlv {
+    const tag: number = buffer[offset] ?? 0;
+    let length: number = buffer[offset + 1] ?? 0;
+    let cursor: number = offset + 2;
+    if ((length & 0x80) !== 0) {
+        const byteCount: number = length & 0x7f;
+        length = 0;
+        for (let i: number = 0; i < byteCount; i++) {
+            length = (length << 8) | (buffer[cursor] ?? 0);
+            cursor += 1;
+        }
+    }
+    return { tag: tag, content: buffer.subarray(cursor, cursor + length), next: cursor + length };
+}
+
+/** Split a DER SEQUENCE into its top-level element contents. */
+function derSequenceElements(der: Buffer): Buffer[] {
+    const sequence: Tlv = readTlv(der, 0);
+    if (sequence.tag !== 0x30) {
+        throw new Error('Ts3Identity: omega is not an ASN.1 SEQUENCE');
+    }
+    const elements: Buffer[] = [];
+    let offset: number = 0;
+    while (offset < sequence.content.length) {
+        const element: Tlv = readTlv(sequence.content, offset);
+        elements.push(element.content);
+        offset = element.next;
+    }
+    return elements;
+}
+
+/** Strip a DER INTEGER's sign byte and left-pad to a fixed 32-byte coordinate. */
+function toCoordinate(raw: Buffer): Buffer {
+    let value: Buffer = raw;
+    while (value.length > COORDINATE_BYTES && value[0] === 0) {
+        value = value.subarray(1);
+    }
+    if (value.length < COORDINATE_BYTES) {
+        value = Buffer.concat([Buffer.alloc(COORDINATE_BYTES - value.length), value]);
+    }
+    return value;
+}
 
 /**
  * A TeamSpeak client **identity** — a permanent NIST P-256 (secp256r1/prime256v1)
@@ -63,9 +167,19 @@ export class Ts3Identity {
         return this._keyOffset;
     }
 
-    /** `omega` — base64 of the public key's SPKI DER encoding. */
+    /**
+     * `omega` — base64 of the public key in TeamSpeak's LibTomCrypt ASN.1 format
+     * (`SEQUENCE { BIT STRING, INTEGER 32, INTEGER x, INTEGER y }`), **not** SPKI.
+     * This is the exact byte layout a real TS3 server parses for the UID and ECDH.
+     */
     public omega(): string {
-        const der: Buffer = this._publicKey.export({ type: 'spki', format: 'der' }) as Buffer;
+        const point: { x: Buffer; y: Buffer } = this._publicPoint();
+        const der: Buffer = derSequence([
+            OMEGA_BIT_STRING,
+            derInteger(Buffer.from([OMEGA_KEY_SIZE])),
+            derInteger(point.x),
+            derInteger(point.y),
+        ]);
         return der.toString('base64');
     }
 
@@ -98,17 +212,40 @@ export class Ts3Identity {
     }
 
     /**
-     * ECDH shared secret with a server public key (SPKI DER): the affine X of
-     * `serverPublic · thisPrivate`, i.e. the raw `computeSecret` result — the `x`
-     * fed into SHA1 to seed the SharedIV (`../PROTOCOL.md` §4.4).
+     * ECDH shared secret with a server public key given as a TeamSpeak `omega` DER
+     * (see the class-level layout): parse the affine X/Y at sequence indices 2/3,
+     * rebuild the P-256 point, and return the affine X of `serverPublic · thisPrivate`
+     * — the `x` fed into SHA1 to seed the SharedIV (`../PROTOCOL.md` §4.4).
      */
-    public sharedSecretX(serverPublicSpkiDer: Buffer): Buffer {
+    public sharedSecretX(serverOmegaDer: Buffer): Buffer {
+        const elements: Buffer[] = derSequenceElements(serverOmegaDer);
+        if (elements.length < 4) {
+            throw new Error('Ts3Identity: malformed omega (expected 4 ASN.1 elements)');
+        }
+        const x: Buffer = toCoordinate(elements[2] as Buffer);
+        const y: Buffer = toCoordinate(elements[3] as Buffer);
         const serverPublic: KeyObject = createPublicKey({
-            key: serverPublicSpkiDer,
-            format: 'der',
-            type: 'spki',
+            key: {
+                kty: 'EC',
+                crv: 'P-256',
+                x: x.toString('base64url'),
+                y: y.toString('base64url'),
+            },
+            format: 'jwk',
         });
         return diffieHellman({ privateKey: this._privateKey, publicKey: serverPublic });
+    }
+
+    /** The public key's affine X/Y coordinates as fixed 32-byte buffers. */
+    private _publicPoint(): { x: Buffer; y: Buffer } {
+        const jwk: JsonWebKey = this._publicKey.export({ format: 'jwk' });
+        if (jwk.x === undefined || jwk.y === undefined) {
+            throw new Error('Ts3Identity: public key has no EC coordinates');
+        }
+        return {
+            x: toCoordinate(Buffer.from(jwk.x, 'base64url')),
+            y: toCoordinate(Buffer.from(jwk.y, 'base64url')),
+        };
     }
 
     private static _securityLevel(omega: string, keyOffset: number): number {

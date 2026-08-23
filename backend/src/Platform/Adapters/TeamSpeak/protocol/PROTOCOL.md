@@ -112,6 +112,12 @@ the shared secret is set).
 - Curve: **NIST P-256 / secp256r1 / prime256v1** — ECDH+ECDSA. **Not** ed25519. (Curve25519
   appears only in the ≥3.1 license path, §4.5.)
 - Identity = permanent P-256 keypair; public key exported as ASN.1 DER (`omega`), base64.
+  **`omega` is TeamSpeak's LibTomCrypt layout, _not_ SPKI** (verbatim from TSLib
+  `TsCrypt.ExportPublicKey`): `SEQUENCE { BIT STRING(0x00, 7 unused bits), INTEGER 32,
+  INTEGER affineX, INTEGER affineY }`; the importer reads X at index 2, Y at index 3.
+  Using SPKI here makes the server reject the key **and** overflows Init1 packet 4 past
+  the 500-byte MTU — the compact form (~108 b64 chars) is required. Implemented in
+  `crypto/Ts3Identity` (`omega()` / `sharedSecretX()`).
 - `UID = base64( SHA1( base64(publicKeyDER) ) )`.
 - **Security level / hashcash:** find decimal `keyOffset` so that
   `level = leading-zero *bits* of SHA1( base64(pubDER) + asciiDecimal(keyOffset) )`

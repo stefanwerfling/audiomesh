@@ -427,6 +427,9 @@ describe('Ts3ProtocolClient — Init1 + handshake', () => {
         const command: TsCommand = h.server.consumeClientInitIv(packet4);
         expect(command.name).toBe('clientinitiv');
         expect(firstValue(command, 'ot')).toBe('1');
+        // The compact TS3 omega keeps packet 4 (with the embedded clientinitiv)
+        // inside the 500-byte UDP MTU — SPKI omega would overflow it.
+        expect(packet4.length).toBeLessThanOrEqual(500);
     });
 
     it('surfaces a server error command as a connect rejection', async (): Promise<void> => {
